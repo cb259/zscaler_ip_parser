@@ -2,6 +2,7 @@ import urllib.request
 import json
 import os
 import boto3
+from botocore.exceptions import ClientError
 
 # Pseudo code
 # X Download json IP list: https://api.config.zscaler.com/zscalertwo.net/cenr/json
