@@ -1,10 +1,11 @@
-import urllib.request
 import json
 import os
+import urllib.request
+
 import boto3
 from botocore.exceptions import ClientError
 
-# Pseudo code
+# To-Do
 # X Download json IP list: https://api.config.zscaler.com/zscalertwo.net/cenr/json
 # X Exclude locations/City: Moscow III, Beijing, Beijing III, Shanghai, Shanghai II, Tianjin
 # X Scrape IP/range for remaining cities
@@ -13,18 +14,19 @@ from botocore.exceptions import ClientError
 # X Pass URL or derrive URL from cloud value
 # X Format output in Palo format
 # X Save/export file
-# - Global configs: File name, cloud, bucket name, excluded cities, 
+# X Global configs: File name, cloud, bucket name, excluded cities, 
 # - Determine how to run (Function)
 # - Determine run frequency: Interval based
 # - Input validation
-# - Extend to PAC
+# - Extend to hubs (PSE), PAC
+# - Deduplicate data list
 
-def zscaleIpParser (cloud):
-     # URL to be targeted
-    url = "https://api.config.zscaler.com/" + cloud + "/cenr/json"
+def zscaleIpParser (cloud, file_name, excluded_cities, bucket_name):
+    # URL to be targeted
+    cen_url = "https://api.config.zscaler.com/" + cloud + "/cenr/json"
 
     # Form the request including setting user-agent
-    request = urllib.request.Request(url)
+    request = urllib.request.Request(cen_url)
     request.add_header("User-Agent", "Mozilla/5.0")
 
     # Fetch the response from the URL
@@ -33,44 +35,43 @@ def zscaleIpParser (cloud):
     # Load the response as JSON
     data = json.loads(response.read())
 
-    # List of excluded cities (Do not need to be an exact match for Zscaler cities)
-    excluded_cities = ["city : Moscow III", "city : Beijing", "city : Beijing III", "city : Shanghai", "city : Shanghai II", "city : Tianjin"]
-
     # Build IP list
-    z_ip_list = buildIpList(excluded_cities, data)
+    z_ip_list = buildCenIpList(cloud, excluded_cities, data)
 
     # Create file and upload to S3
-    uploadToS3(z_ip_list, "zscaler_ip_list.txt", "cb-test-buc")
+    uploadToS3(z_ip_list, file_name, bucket_name)
 
     # Return the IP list
     return z_ip_list
 
-def buildIpList (exclusions, json_data):
+def buildCenIpList (cloud, exclusions, json_data):
     # Create IP prefix list
     zscaler_ip_list = []
 
     # Grab continents
     zscaler_continents = []
-    for continent in json_data["zscalertwo.net"]:
+    for continent in json_data[cloud]:
         zscaler_continents.append(continent)
 
     # Enumerate through Zscaler continents
     for i in zscaler_continents:
-        for city in json_data["zscalertwo.net"][i]:
+        for city in json_data[cloud][i]:
             # Confirm that city is not in the exclusion list
             if city not in exclusions:
                 # Enumerate though cities in Zscaler data
-                for dic_data in json_data["zscalertwo.net"][i][city]:
+                for dic_data in json_data[cloud][i][city]:
                     # Check to ensure the data does not have a colon (IPv6) before adding it
                     if ":" not in dic_data.get('range'):
                         # Add range (IP subnet) to output list
                         zscaler_ip_list.append(dic_data.get('range'))
 
+    # Deduplicate list
+    deduped_ip_list = list(dict.fromkeys(zscaler_ip_list))
     # Return the IP list
-    return zscaler_ip_list
+    return deduped_ip_list
 
 def uploadToS3(data, file_name, bucket_name):
-     # Open the file
+    # Open the file & write data
     with open(file_name, 'w') as f:
         # Iterate over each item in the data
         for line in data:
@@ -92,12 +93,11 @@ def uploadToS3(data, file_name, bucket_name):
         return False
     return True
 
-    # Remove local file
-    if os.path.exists(file_name):
-        os.remove(file_name)
-
 # If application is being called directly
 if __name__ == '__main__':
-    data = zscaleIpParser("zscalertwo.net")
+    # List of excluded cities (Do not need to be an exact match for Zscaler cities)
+    excluded_cities = ["city : Moscow III", "city : Beijing", "city : Beijing III", "city : Shanghai", "city : Shanghai II", "city : Tianjin"]
+
+    data = zscaleIpParser("zscalertwo.net", "zscaler_ip_list.txt", excluded_cities, "cb-test-buc")
 
     #print(data)
